@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SimHeut96 — Admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 1.4em; margin-top: 32px; }
+  label { display: block; margin-top: 16px; font-weight: 600; font-size: 0.9em; }
+  input, select { width: 100%; padding: 10px; margin-top: 6px; border-radius: 8px; border: 1px solid #ccc; font-size: 1em; box-sizing: border-box; }
+  button { margin-top: 20px; padding: 10px 16px; border-radius: 8px; border: none; background: #2563eb; color: white; font-size: 0.95em; cursor: pointer; }
+  button.danger { background: #dc2626; }
+  button.small { padding: 6px 10px; font-size: 0.8em; margin-top: 0; }
+  #login, #panel { display: none; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.82em; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  #newcode { margin-top: 16px; padding: 14px; border-radius: 8px; background: #eff6ff; display: none; font-family: monospace; font-size: 1.05em; word-break: break-all; }
+  .err { color: #991b1b; margin-top: 10px; }
+  .badge { padding: 2px 8px; border-radius: 12px; font-size: 0.78em; }
+  .badge.actif { background: #dcfce7; color: #166534; }
+  .badge.inactif { background: #f1f5f9; color: #475569; }
+  .badge.revoque { background: #fee2e2; color: #991b1b; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+  .stat-card { background: #f8fafc; border-radius: 8px; padding: 12px; }
+  .stat-card .num { font-size: 1.6em; font-weight: 700; }
+  .stat-card .label { font-size: 0.78em; color: #64748b; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Connexion admin</h1>
+  <label for="pwd">Mot de passe</label>
+  <input id="pwd" type="password">
+  <button onclick="connexion()">Se connecter</button>
+  <div id="loginErr" class="err"></div>
+</div>
+
+<div id="panel">
+
+  <h1>Statistiques</h1>
+  <div class="stats-grid" id="stats"></div>
+
+  <h1>Générer un code de licence</h1>
+  <label for="plan">Plan</label>
+  <select id="plan">
+    <option value="ESSAI">Essai gratuit (30 jours, 20 membres)</option>
+    <option value="STD">Standard (1 an, 60 membres)</option>
+    <option value="PRO">Pro (1 an, illimité)</option>
+  </select>
+  <label for="email">Email de l'association (optionnel — envoie le code automatiquement)</label>
+  <input id="email" type="email" placeholder="contact@association.fr">
+  <button onclick="generer()">Générer le code</button>
+
+  <div id="newcode"></div>
+
+  <h1>Codes déjà générés</h1>
+  <table id="table">
+    <thead><tr><th>Code</th><th>Plan</th><th>Statut</th><th>Association</th><th>Email</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+let ADMIN_PASSWORD = sessionStorage.getItem('admin_pwd') || '';
+
+async function connexion() {
+  const pwd = document.getElementById('pwd').value;
+  const res = await fetch('/api/admin/codes', { headers: { 'X-Admin-Password': pwd } });
+  if (res.status === 401) {
+    document.getElementById('loginErr').textContent = "Mot de passe incorrect.";
+    return;
+  }
+  ADMIN_PASSWORD = pwd;
+  sessionStorage.setItem('admin_pwd', pwd);
+  afficherPanel();
+}
+
+async function generer() {
+  const plan = document.getElementById('plan').value;
+  const email = document.getElementById('email').value.trim();
+  const res = await fetch('/api/admin/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': ADMIN_PASSWORD },
+    body: JSON.stringify({ plan, email_destinataire: email || null })
+  });
+  const data = await res.json();
+  const div = document.getElementById('newcode');
+  div.style.display = 'block';
+
+  let emailMsg = '';
+  if (email) {
+    emailMsg = data.email_envoye
+      ? ` — ✓ envoyé par email à ${email}`
+      : data.email_configure
+        ? ` — ✗ échec de l'envoi de l'email (vérifiez l'adresse)`
+        : ` — ⚠ email non envoyé : SMTP non configuré sur le serveur (variables SIMHEUT96_SMTP_*)`;
+  }
+  div.textContent = `${data.code}  (${data.label}, expire le ${data.date_expiration})${emailMsg}`;
+  document.getElementById('email').value = '';
+  chargerCodes();
+  chargerStats();
+}
+
+async function revoquer(code) {
+  if (!confirm(`Révoquer le code ${code} ? Il ne pourra plus être utilisé.`)) return;
+  await fetch('/api/admin/revoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': ADMIN_PASSWORD },
+    body: JSON.stringify({ code })
+  });
+  chargerCodes();
+  chargerStats();
+}
+
+async function annulerRevocation(code) {
+  await fetch('/api/admin/unrevoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': ADMIN_PASSWORD },
+    body: JSON.stringify({ code })
+  });
+  chargerCodes();
+  chargerStats();
+}
+
+async function chargerStats() {
+  const res = await fetch('/api/admin/stats', { headers: { 'X-Admin-Password': ADMIN_PASSWORD } });
+  const s = await res.json();
+  const el = document.getElementById('stats');
+  el.innerHTML = `
+    <div class="stat-card"><div class="num">${s.total_generes}</div><div class="label">Codes générés</div></div>
+    <div class="stat-card"><div class="num">${s.total_actives}</div><div class="label">Associations actives</div></div>
+    <div class="stat-card"><div class="num">${s.expirent_bientot_30j}</div><div class="label">Expirent sous 30 jours</div></div>
+    <div class="stat-card"><div class="num">${s.total_revoques}</div><div class="label">Codes révoqués</div></div>
+  `;
+}
+
+async function chargerCodes() {
+  const res = await fetch('/api/admin/codes', { headers: { 'X-Admin-Password': ADMIN_PASSWORD } });
+  const data = await res.json();
+  const tbody = document.querySelector('#table tbody');
+  tbody.innerHTML = '';
+  for (const c of data.codes) {
+    const tr = document.createElement('tr');
+
+    let statutBadge, actionBtn;
+    if (c.revocation) {
+      statutBadge = `<span class="badge revoque">Révoqué</span>`;
+      actionBtn = `<button class="small" onclick="annulerRevocation('${c.code}')">Annuler</button>`;
+    } else if (c.activation) {
+      const expire = new Date(c.activation.date_expiration) < new Date();
+      statutBadge = expire ? `<span class="badge inactif">Expiré</span>` : `<span class="badge actif">Actif</span>`;
+      actionBtn = `<button class="small danger" onclick="revoquer('${c.code}')">Révoquer</button>`;
+    } else {
+      statutBadge = `<span class="badge inactif">Non activé</span>`;
+      actionBtn = `<button class="small danger" onclick="revoquer('${c.code}')">Révoquer</button>`;
+    }
+
+    const assoc = c.activation ? (c.activation.association_nom || c.activation.association_id) : '—';
+    const emailStatut = c.email_destinataire
+      ? (c.email_envoye ? `✓ ${c.email_destinataire}` : `✗ ${c.email_destinataire}`)
+      : '—';
+
+    tr.innerHTML = `<td>${c.code}</td><td>${c.plan}</td><td>${statutBadge}</td><td>${assoc}</td><td>${emailStatut}</td><td>${actionBtn}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function afficherPanel() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+  chargerCodes();
+  chargerStats();
+}
+
+if (ADMIN_PASSWORD) {
+  fetch('/api/admin/codes', { headers: { 'X-Admin-Password': ADMIN_PASSWORD } })
+    .then(r => r.status === 200 ? afficherPanel() : (document.getElementById('login').style.display = 'block'));
+} else {
+  document.getElementById('login').style.display = 'block';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SimHeut96 — Activation de licence</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 1.4em; }
+  label { display: block; margin-top: 16px; font-weight: 600; font-size: 0.9em; }
+  input { width: 100%; padding: 10px; margin-top: 6px; border-radius: 8px; border: 1px solid #ccc; font-size: 1em; box-sizing: border-box; }
+  button { margin-top: 24px; width: 100%; padding: 12px; border-radius: 8px; border: none; background: #2563eb; color: white; font-size: 1em; cursor: pointer; }
+  button:disabled { background: #93c5fd; }
+  #result { margin-top: 20px; padding: 14px; border-radius: 8px; display: none; }
+  .ok { background: #dcfce7; color: #166534; }
+  .err { background: #fee2e2; color: #991b1b; }
+</style>
+</head>
+<body>
+  <h1>Activation de votre licence SimHeut96</h1>
+  <p>Saisissez le code d'activation reçu et le nom de votre association.</p>
+
+  <label for="code">Code d'activation</label>
+  <input id="code" placeholder="SIMH-XXXX-XXXX-XXXX">
+
+  <label for="assoc_id">Identifiant de l'association</label>
+  <input id="assoc_id" placeholder="ex : flambeau-001">
+
+  <label for="assoc_nom">Nom de l'association</label>
+  <input id="assoc_nom" placeholder="ex : Association Le Flambeau">
+
+  <button id="btn" onclick="activer()">Activer</button>
+
+  <div id="result"></div>
+
+<script>
+async function activer() {
+  const code = document.getElementById('code').value.trim();
+  const assoc_id = document.getElementById('assoc_id').value.trim();
+  const assoc_nom = document.getElementById('assoc_nom').value.trim();
+  const btn = document.getElementById('btn');
+  const result = document.getElementById('result');
+
+  if (!code || !assoc_id) {
+    result.style.display = 'block';
+    result.className = 'err';
+    result.textContent = "Merci de remplir le code et l'identifiant de l'association.";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Activation en cours...";
+
+  try {
+    const res = await fetch('/api/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, association_id: assoc_id, association_nom: assoc_nom })
+    });
+    const data = await res.json();
+
+    result.style.display = 'block';
+    if (data.valide) {
+      result.className = 'ok';
+      result.textContent = `✓ ${data.raison} — Plan ${data.plan}, valable jusqu'au ${data.date_expiration}.`;
+    } else {
+      result.className = 'err';
+      result.textContent = `✗ ${data.raison}`;
+    }
+  } catch (e) {
+    result.style.display = 'block';
+    result.className = 'err';
+    result.textContent = "Erreur de connexion au serveur.";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Activer";
+  }
+}
+</script>
+</body>
+</html>
